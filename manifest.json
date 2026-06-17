@@ -1,0 +1,13 @@
+{
+  "id": "keepalive",
+  "name": "后台保活",
+  "version": "1.0.0",
+  "description": "纯Web后台保活：Wake Lock + 静默音频循环，无需特殊APK即可防止Roche被系统杀死。",
+  "author": "Roche Community",
+  "entry": "https://raw.githubusercontent.com/yechen1844/keepalive/main/plugin.js",
+  "hash": "",
+  "permissions": [
+    "storage",
+    "ui"
+  ]
+}
