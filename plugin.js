@@ -1,8 +1,11 @@
 /**
  * ============================================================
- *  Roche 鍚庡彴淇濇椿鎻掍欢 v2.3.0
+ *  Roche Keep Alive Plugin v2.6.0
  *
- *  鏍稿績鏂规锛欰PK 鍘熺敓鍓嶅彴 Service锛坣ativeAudioBridge锛? *  澶囩敤鏂规锛歐eb 闈欓粯闊抽寰幆锛堟棤 APK 鏃惰嚜鍔ㄥ惎鐢級
+ *  Tier 1: Native startKeepAlive() - APK built-in 20s silence
+ *  Tier 2: replaceQueue android.resource - built-in 20s
+ *  Tier 3: replaceQueue remote silence - 1s fallback
+ *  Fallback: Silent Web Audio loop (web / no APK)
  * ============================================================
  */
 
@@ -13,7 +16,7 @@
 
   function $id(id) { return document.getElementById(id); }
 
-  // ========== 鐜妫€娴?==========
+  // ========== Capability Detection ==========
 
   function hasNativeAudio() {
     try { return !!(window.nativeAudioBridge && window.nativeAudioBridge.__ready); } catch (e) { return false; }
@@ -23,29 +26,55 @@
     return !!(window.AudioContext || window.webkitAudioContext);
   }
 
-  // ========== 鍘熺敓 Audio Bridge锛圓PK 淇濇椿锛屾牳蹇冩柟妗堬級 ==========
+  // ========== Native Audio Bridge (APK) ==========
 
-  var SILENCE_URL = 'https://raw.githubusercontent.com/yechen1844/char-task-monitor/main/silence.wav';
+  var REMOTE_SILENCE_URL = 'https://cdn.jsdelivr.net/gh/luyi90720-sys/keepalive@main/silence.wav';
 
   async function startNativeKeepAlive() {
     if (!hasNativeAudio()) return false;
+
+    // Tier 1: APK built-in 20s silence (no VPN needed, most reliable)
     try {
-      if (window.nativeAudioBridge.startKeepAlive) {
+      if (typeof window.nativeAudioBridge.startKeepAlive === 'function') {
         await window.nativeAudioBridge.startKeepAlive();
+        console.log('[KeepAlive] Native startKeepAlive OK (built-in 20s)');
         return true;
       }
+    } catch (e) {
+      console.warn('[KeepAlive] startKeepAlive() failed:', e);
+    }
+
+    // Tier 2: replaceQueue with built-in android.resource (20s)
+    try {
       await window.nativeAudioBridge.replaceQueue([{
         id: 'keepalive',
-        title: 'Roche淇濇椿',
+        title: 'Roche Keep Alive',
         artist: '',
         cover: '',
-        url: SILENCE_URL
+        url: 'android.resource://com.roche.app/raw/silence'
       }], 0, 'loop', true);
+      console.log('[KeepAlive] replaceQueue built-in OK (20s)');
       return true;
     } catch (e) {
-      console.warn('[KeepAlive] 鍘熺敓淇濇椿鍚姩澶辫触:', e);
-      return false;
+      console.warn('[KeepAlive] replaceQueue built-in failed:', e);
     }
+
+    // Tier 3: replaceQueue with remote silence (1s, needs VPN)
+    try {
+      await window.nativeAudioBridge.replaceQueue([{
+        id: 'keepalive',
+        title: 'Roche Keep Alive',
+        artist: '',
+        cover: '',
+        url: REMOTE_SILENCE_URL
+      }], 0, 'loop', true);
+      console.log('[KeepAlive] replaceQueue remote OK (1s)');
+      return true;
+    } catch (e) {
+      console.warn('[KeepAlive] replaceQueue remote failed:', e);
+    }
+
+    return false;
   }
 
   async function stopNativeKeepAlive() {
@@ -53,7 +82,7 @@
     try { await window.nativeAudioBridge.stop(); } catch (e) { /* ignore */ }
   }
 
-  // ========== Web Audio 闈欓粯闊抽锛堝鐢ㄦ柟妗堬級 ==========
+  // ========== Web Audio Fallback ==========
 
   var _audioCtx = null;
   var _silentSource = null;
@@ -63,7 +92,8 @@
 
   function createSilentWavBlob() {
     var sampleRate = 8000;
-    var numSamples = sampleRate * 20; // 20 绉?    var dataSize = numSamples * 2;
+    var numSamples = sampleRate * 20;
+    var dataSize = numSamples * 2;
     var buffer = new ArrayBuffer(44 + dataSize);
     var view = new DataView(buffer);
     function writeString(offset, str) {
@@ -92,7 +122,8 @@
       var AudioCtx = window.AudioContext || window.webkitAudioContext;
       _audioCtx = new AudioCtx();
       var sampleRate = _audioCtx.sampleRate;
-      var buffer = _audioCtx.createBuffer(1, sampleRate * 20, sampleRate); // 20 绉?      _silentSource = _audioCtx.createBufferSource();
+      var buffer = _audioCtx.createBuffer(1, sampleRate * 20, sampleRate);
+      _silentSource = _audioCtx.createBufferSource();
       _silentSource.buffer = buffer;
       _silentSource.loop = true;
       _silentSource.connect(_audioCtx.destination);
@@ -102,7 +133,7 @@
       }, 30000);
       return true;
     } catch (e) {
-      console.warn('[KeepAlive] Web Audio 鍚姩澶辫触:', e);
+      console.warn('[KeepAlive] Web Audio start failed:', e);
       return false;
     }
   }
@@ -128,7 +159,7 @@
       }, 25000);
       return true;
     } catch (e) {
-      console.warn('[KeepAlive] HTML Audio 鍚姩澶辫触:', e);
+      console.warn('[KeepAlive] HTML Audio start failed:', e);
       return false;
     }
   }
@@ -140,7 +171,7 @@
     if (_htmlAudioInterval) { clearInterval(_htmlAudioInterval); _htmlAudioInterval = null; }
   }
 
-  // ========== 缁熶竴鍚仠 ==========
+  // ========== Unified Control ==========
 
   async function startKeepAlive() {
     if (hasNativeAudio()) {
@@ -158,7 +189,7 @@
     stopHtmlAudioKeepAlive();
   }
 
-  // ========== Storage ==========
+  // ========== Storage Helpers ==========
 
   function storageGet(roche, key, fallback) {
     try {
@@ -172,13 +203,13 @@
     try { return roche.storage.set(key, value); } catch (e) { return Promise.resolve(); }
   }
 
-  // ========== CSS锛堢畝娲?+ 鍙粴鍔級 ==========
+  // ========== CSS ==========
 
   function getCSS() {
     return '.roche-plugin-keepalive{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#e0e0e0;background:#1a1a2e;height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0;box-sizing:border-box}.roche-plugin-keepalive *,.roche-plugin-keepalive *::before,.roche-plugin-keepalive *::after{box-sizing:border-box}.ka-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:#16213e;border-bottom:1px solid #0f3460;position:sticky;top:0;z-index:10}.ka-title{margin:0;font-size:17px;font-weight:600}.ka-close{background:none;border:1px solid #0f3460;color:#e0e0e0;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:14px;line-height:1}.ka-close:hover{background:#0f3460}.ka-body{padding:16px}.ka-card{background:#16213e;border-radius:10px;padding:16px;margin-bottom:12px;border:1px solid #0f3460}.ka-card h3{margin:0 0 6px;font-size:15px;color:#4ecca3}.ka-card p{margin:0 0 8px;font-size:13px;color:#999;line-height:1.5}.ka-status{display:flex;align-items:center;gap:10px;margin-bottom:16px}.ka-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}.ka-dot-on{background:#4ecca3;box-shadow:0 0 6px #4ecca3}.ka-dot-off{background:#555}.ka-status-text{font-size:15px;font-weight:500}.ka-toggle-row{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:#16213e;border-radius:10px;border:1px solid #0f3460;margin-bottom:12px}.ka-toggle-label{font-size:15px;font-weight:500}.ka-toggle{position:relative;width:48px;height:26px;cursor:pointer}.ka-toggle input{opacity:0;width:0;height:0}.ka-toggle-slider{position:absolute;inset:0;background:#333;border-radius:13px;transition:background .3s}.ka-toggle-slider::before{content:"";position:absolute;width:20px;height:20px;left:3px;top:3px;background:#e0e0e0;border-radius:50%;transition:transform .3s}.ka-toggle input:checked+.ka-toggle-slider{background:#4ecca3}.ka-toggle input:checked+.ka-toggle-slider::before{transform:translateX(22px)}.ka-notice{background:#2c2e20;border:1px solid #4ecca3;border-radius:8px;padding:10px;font-size:12px;color:#999;line-height:1.5;margin-bottom:12px}.ka-warn{background:#3d201d;border-color:#e74c3c}.ka-btn{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:500;transition:background .2s}.ka-btn-primary{background:#4ecca3;color:#1a1a2e}.ka-btn-primary:hover{background:#3db88d}.ka-btn-danger{background:#c0392b;color:#e0e0e0}.ka-btn-danger:hover{background:#a93226}.ka-actions{display:flex;gap:8px;margin-top:12px}.ka-info-item{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #0f3460;font-size:12px}.ka-info-item:last-child{border-bottom:none}.ka-info-key{color:#666}.ka-info-val{color:#e0e0e0;font-weight:500}.ka-badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px}.ka-badge-apk{background:#4ecca3;color:#1a1a2e}.ka-badge-web{background:#3498db;color:#fff}.ka-method{font-size:14px;font-weight:600;margin-bottom:4px}';
   }
 
-  // ========== 娓叉煋 ==========
+  // ========== Render ==========
 
   function renderMain(container, roche) {
     var nativeAudio = hasNativeAudio();
@@ -190,56 +221,58 @@
       h += '<style>' + getCSS() + '</style>';
 
       // Header
-      h += '<div class="ka-header"><h2 class="ka-title">鍚庡彴淇濇椿</h2><button class="ka-close" id="ka-close">\u2715</button></div>';
+      h += '<div class="ka-header"><h2 class="ka-title">Keep Alive</h2><button class="ka-close" id="ka-close">&#10005;</button></div>';
 
       h += '<div class="ka-body">';
 
-      // 鐘舵€?      h += '<div class="ka-status">';
+      // Status
+      h += '<div class="ka-status">';
       h += '<div class="ka-dot ' + (enabled ? 'ka-dot-on' : 'ka-dot-off') + '"></div>';
-      h += '<span class="ka-status-text">' + (enabled ? '淇濇椿杩愯涓? : '淇濇椿鏈惎鍔?) + '</span>';
+      h += '<span class="ka-status-text">' + (enabled ? 'Running' : 'Stopped') + '</span>';
       h += '</div>';
 
-      // 淇濇椿鏂瑰紡
+      // Method card
       h += '<div class="ka-card">';
       if (nativeAudio) {
-        h += '<div class="ka-method">鍘熺敓鍓嶅彴 Service <span class="ka-badge ka-badge-apk">APK</span></div>';
-        h += '<p>閫氱煡鏍忔樉绀?姝ｅ湪鎾斁"锛岀郴缁熶笉浼氭潃 Roche銆?/p>';
+        h += '<div class="ka-method">Native Foreground Service <span class="ka-badge ka-badge-apk">APK</span></div>';
+        h += '<p>Uses a foreground media service. Android keeps Roche alive.</p>';
       } else {
-        h += '<div class="ka-method">Web 闈欓粯闊抽 <span class="ka-badge ka-badge-web">Web</span></div>';
-        h += '<p>寰幆鎾斁鏃犲０闊抽锛岄檷浣庤鏉€姒傜巼銆傛晥鏋滀笉濡?APK 鍘熺敓鏂规銆?/p>';
+        h += '<div class="ka-method">Silent Web Audio <span class="ka-badge ka-badge-web">Web</span></div>';
+        h += '<p>Plays silent audio in a loop. Less reliable than native APK.</p>';
       }
       h += '</div>';
 
-      // 寮€鍏?      h += '<div class="ka-toggle-row"><span class="ka-toggle-label">鍚敤淇濇椿</span>';
+      // Toggle
+      h += '<div class="ka-toggle-row"><span class="ka-toggle-label">Enable Keep Alive</span>';
       h += '<label class="ka-toggle"><input type="checkbox" id="ka-toggle"' + (enabled ? ' checked' : '') + '><span class="ka-toggle-slider"></span></label>';
       h += '</div>';
 
-      // 鎸夐挳
+      // Buttons
       h += '<div class="ka-actions">';
-      h += '<button class="ka-btn ka-btn-primary" id="ka-start">鍚姩</button>';
-      h += '<button class="ka-btn ka-btn-danger" id="ka-stop">鍋滄</button>';
+      h += '<button class="ka-btn ka-btn-primary" id="ka-start">Start</button>';
+      h += '<button class="ka-btn ka-btn-danger" id="ka-stop">Stop</button>';
       h += '</div>';
 
-      // 鐜淇℃伅
-      h += '<div class="ka-card"><h3>鐜</h3>';
-      h += '<div class="ka-info-item"><span class="ka-info-key">nativeAudioBridge</span><span class="ka-info-val">' + (nativeAudio ? '宸叉敞鍐? : '鏈敞鍐?) + '</span></div>';
-      h += '<div class="ka-info-item"><span class="ka-info-key">Web Audio</span><span class="ka-info-val">' + (webAudio ? '鏀寔' : '涓嶆敮鎸?) + '</span></div>';
-      h += '<div class="ka-info-item"><span class="ka-info-key">淇濇椿鏂瑰紡</span><span class="ka-info-val">' + (nativeAudio ? '鍘熺敓 Service' : 'Web 闊抽') + '</span></div>';
-      h += '<div class="ka-info-item"><span class="ka-info-key">鐘舵€?/span><span class="ka-info-val">' + (enabled ? '杩愯涓? : '鏈惎鍔?) + '</span></div>';
+      // Environment
+      h += '<div class="ka-card"><h3>Environment</h3>';
+      h += '<div class="ka-info-item"><span class="ka-info-key">nativeAudioBridge</span><span class="ka-info-val">' + (nativeAudio ? 'Ready' : 'Not available') + '</span></div>';
+      h += '<div class="ka-info-item"><span class="ka-info-key">Web Audio</span><span class="ka-info-val">' + (webAudio ? 'Supported' : 'Not supported') + '</span></div>';
+      h += '<div class="ka-info-item"><span class="ka-info-key">Method</span><span class="ka-info-val">' + (nativeAudio ? 'Native Service' : 'Web Audio') + '</span></div>';
+      h += '<div class="ka-info-item"><span class="ka-info-key">Status</span><span class="ka-info-val">' + (enabled ? 'Running' : 'Stopped') + '</span></div>';
       h += '</div>';
 
-      // 鎻愮ず
+      // Notice
       if (!nativeAudio) {
-        h += '<div class="ka-notice ka-warn">Web 淇濇椿鏁堟灉鏈夐檺锛屽缓璁墦鍖?APK 鑾峰緱鍘熺敓淇濇椿銆?/div>';
+        h += '<div class="ka-notice ka-warn">Web keep-alive is less reliable. Build the APK for native keep-alive.</div>';
       } else {
-        h += '<div class="ka-notice">閫氱煡鏍?Roche淇濇椿"鏄?Android 鍓嶅彴 Service 鐨勮姹傘€?/div>';
+        h += '<div class="ka-notice">The notification is required by Android foreground services.</div>';
       }
 
       h += '</div></div>';
 
       container.innerHTML = h;
 
-      // 浜嬩欢
+      // Events
       $id('ka-close').onclick = function () { roche.ui.closeApp(); };
 
       var toggle = $id('ka-toggle');
@@ -248,16 +281,16 @@
           if (toggle.checked) {
             startKeepAlive().then(function () {
               storageSet(roche, STORAGE_KEY, true);
-              roche.ui.toast('淇濇椿宸插惎鍔?);
+              roche.ui.toast('Keep alive started');
               renderMain(container, roche);
             }).catch(function (e) {
-              roche.ui.toast('鍚姩澶辫触: ' + e);
+              roche.ui.toast('Start failed: ' + e);
               toggle.checked = false;
             });
           } else {
             stopKeepAlive().then(function () {
               storageSet(roche, STORAGE_KEY, false);
-              roche.ui.toast('淇濇椿宸插仠姝?);
+              roche.ui.toast('Keep alive stopped');
               renderMain(container, roche);
             });
           }
@@ -269,9 +302,9 @@
         startBtn.onclick = function () {
           startKeepAlive().then(function () {
             storageSet(roche, STORAGE_KEY, true);
-            roche.ui.toast('淇濇椿宸插惎鍔?);
+            roche.ui.toast('Keep alive started');
             renderMain(container, roche);
-          }).catch(function (e) { roche.ui.toast('鍚姩澶辫触: ' + e); });
+          }).catch(function (e) { roche.ui.toast('Start failed: ' + e); });
         };
       }
 
@@ -280,7 +313,7 @@
         stopBtn.onclick = function () {
           stopKeepAlive().then(function () {
             storageSet(roche, STORAGE_KEY, false);
-            roche.ui.toast('淇濇椿宸插仠姝?);
+            roche.ui.toast('Keep alive stopped');
             renderMain(container, roche);
           });
         };
@@ -291,17 +324,17 @@
   }
 
   // ============================
-  //  鎻掍欢娉ㄥ唽
+  //  Plugin Registration
   // ============================
 
   window.RochePlugin.register({
     id: 'keepalive',
-    name: '鍚庡彴淇濇椿',
-    version: '2.3.0',
+    name: 'Keep Alive',
+    version: '2.6.0',
     apps: [
       {
         id: 'keepalive-home',
-        name: '鍚庡彴淇濇椿',
+        name: 'Keep Alive',
         icon: 'battery_charging_full',
         iconImage: '',
         async mount(container, roche) {
@@ -314,6 +347,6 @@
     ]
   });
 
-  console.log('[KeepAlive] v2.2.0 | ' + (hasNativeAudio() ? 'APK 鍘熺敓 Service' : 'Web 闈欓粯闊抽'));
+  console.log('[KeepAlive] v2.6.0 | ' + (hasNativeAudio() ? 'Native Service' : 'Web Audio'));
 
 })();
